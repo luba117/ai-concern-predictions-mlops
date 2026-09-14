@@ -358,6 +358,14 @@ paket-files/
 #tools/**
 #!tools/packages.config
 
+# Python virtual environments
+.venv/
+venv/
+.pytest_cache/
+
+# Local scratch files / secrets (e.g. ACR credentials)
+tmp/
+
 # Tabs Studio
 *.tss
 
