@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   pull_request:
@@ -8,9 +8,16 @@ on:
     branches:
       - main
 
+env:
+  IMAGE_NAME: churn-api
+
 jobs:
+
+  # ------------------------------------------------------ CI --
   test-and-build:
+    name: Test and build
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -18,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12.10"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: |
@@ -59,5 +66,110 @@ jobs:
             --test_data outputs/test \
             --output_dir outputs/metrics
 
+      - name: Show metrics
+        run: cat outputs/metrics/metrics.json
+
+      # The model trained above is uploaded once here, and downloaded
+      # by push-image below. Every job gets a fresh machine with nothing
+      # on it, so this is the only way to hand a file from one job to
+      # another without retraining it.
+      - name: Upload the trained model
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: outputs/model/model.pkl
+          retention-days: 7
+
       - name: Build Docker image
-        run: docker build -t churn-api:ci .
+        run: docker build -t $IMAGE_NAME:ci .
+
+  # ------------------------------------------------------ CD --
+  push-image:
+    name: Push image to ACR
+    needs: test-and-build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Same model test-and-build already trained and evaluated.
+      # No retraining, no second download of the dataset.
+      - name: Download the trained model via artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: outputs/model
+
+      - name: Confirm the model arrived
+        run: ls -la outputs/model/model.pkl
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to the registry
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Build and push, tagged with the commit
+        run: |
+          REGISTRY=${{ vars.ACR_NAME }}.azurecr.io
+          docker build -t $REGISTRY/$IMAGE_NAME:${{ github.sha }} .
+          docker tag $REGISTRY/$IMAGE_NAME:${{ github.sha }} \
+            $REGISTRY/$IMAGE_NAME:latest
+          docker push $REGISTRY/$IMAGE_NAME:${{ github.sha }}
+          docker push $REGISTRY/$IMAGE_NAME:latest
+
+  deploy:
+    name: Deploy
+    needs: push-image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update the container app
+        run: |
+          REGISTRY=${{ vars.ACR_NAME }}.azurecr.io
+          az containerapp update \
+            --name churn-api \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --image $REGISTRY/$IMAGE_NAME:${{ github.sha }}
+
+      - name: Get the public URL
+        id: url
+        run: |
+          FQDN=$(az containerapp show \
+            --name churn-api \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "fqdn=$FQDN" >> $GITHUB_OUTPUT
+          echo "Deployed to https://$FQDN"
+
+      - name: Smoke test the live endpoint
+        run: |
+          for i in $(seq 1 20); do
+            URL=https://${{ steps.url.outputs.fqdn }}/health
+            if curl -sf "$URL"; then
+              echo "healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "endpoint did not become healthy"
+          exit 1
+
+      - name: Summary
+        run: |
+          echo "### Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- Image tag: ${{ github.sha }}" \
+            >> $GITHUB_STEP_SUMMARY
+          echo "- URL: https://${{ steps.url.outputs.fqdn }}" \
+            >> $GITHUB_STEP_SUMMARY
