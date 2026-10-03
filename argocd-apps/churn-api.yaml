@@ -4,7 +4,8 @@ metadata:
   name: churn-api
   namespace: argocd
 spec:
-  project: default
+  spec:
+  project: dev-team
   source:
     repoURL: https://github.com/luba117/ai-concern-predictions-mlops.git
     targetRevision: main
