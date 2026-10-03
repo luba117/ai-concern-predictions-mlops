@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: broken-crashloop
+spec:
+  containers:
+    - name: churn-api
+      image: churn-api:v1
+      imagePullPolicy: Never
+      command: ["sh", "-c", "echo 'Application failed during startup sequence!' && exit 1"]

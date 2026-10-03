@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: churn-api-config
+  namespace: churn-dev
+data:
+  DECISION_THRESHOLD: "0.5"
