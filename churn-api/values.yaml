@@ -1,0 +1,14 @@
+replicaCount: 5
+image:
+  repository: churn-api
+  tag: v1
+decisionThreshold: "0.3"
+ingress:
+  enabled: false
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "250m"
+    memory: "256Mi"
