@@ -1,7 +1,10 @@
+{{- $tag := required "set image.tag" .Values.image.tag }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: churn-api
+  labels:
+    {{- include "churn-api.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -14,10 +17,28 @@ spec:
     spec:
       containers:
         - name: churn-api
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           env:
             - name: DECISION_THRESHOLD
               value: {{ .Values.decisionThreshold | quote }}
+            {{- range .Values.extraEnv }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
