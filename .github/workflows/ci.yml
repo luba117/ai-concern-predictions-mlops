@@ -7,7 +7,13 @@ on:
   push:
     branches:
       - main
-
+    paths:
+    - "src/**"
+    - "tests/**"
+    - "Dockerfile"
+    - "requirements.txt"
+    - "pytest.ini"
+    - ".github/workflows/ci.yml"  
 env:
   IMAGE_NAME: churn-api
 
@@ -16,7 +22,7 @@ jobs:
   # ------------------------------------------------------ CI --
   test-and-build:
     name: Test and build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
@@ -88,7 +94,7 @@ jobs:
     name: Push image to ACR
     needs: test-and-build
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
@@ -122,54 +128,38 @@ jobs:
           docker push $REGISTRY/$IMAGE_NAME:${{ github.sha }}
           docker push $REGISTRY/$IMAGE_NAME:latest
 
-  deploy:
-    name: Deploy
+  update-dev:
+    name: Point dev at the new image
     needs: push-image
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: gitops-manifest-update
+      cancel-in-progress: false
     steps:
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Update the container app
+      - name: Set the new tag for dev
+        env:
+          TAG: ${{ github.sha }}
         run: |
-          REGISTRY=${{ vars.ACR_NAME }}.azurecr.io
-          az containerapp update \
-            --name churn-api \
-            --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --image $REGISTRY/$IMAGE_NAME:${{ github.sha }}
+          yq -i '.image.tag = strenv(TAG) | .image.tag style="double"' \
+            churn-api/values-dev.yaml
+          cat churn-api/values-dev.yaml
 
-      - name: Get the public URL
-        id: url
+      - name: Commit and push
         run: |
-          FQDN=$(az containerapp show \
-            --name churn-api \
-            --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --query properties.configuration.ingress.fqdn -o tsv)
-          echo "fqdn=$FQDN" >> $GITHUB_OUTPUT
-          echo "Deployed to https://$FQDN"
-
-      - name: Smoke test the live endpoint
-        run: |
-          for i in $(seq 1 20); do
-            URL=https://${{ steps.url.outputs.fqdn }}/health
-            if curl -sf "$URL"; then
-              echo "healthy"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "endpoint did not become healthy"
-          exit 1
-
-      - name: Summary
-        run: |
-          echo "### Deployed" >> $GITHUB_STEP_SUMMARY
-          echo "- Image tag: ${{ github.sha }}" \
-            >> $GITHUB_STEP_SUMMARY
-          echo "- URL: https://${{ steps.url.outputs.fqdn }}" \
-            >> $GITHUB_STEP_SUMMARY
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git add churn-api/values-dev.yaml
+          if git diff --cached --quiet; then
+            echo "dev already runs this tag"
+            exit 0
+          fi
+          git commit -m "ci: dev -> ${GITHUB_SHA::7} [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
