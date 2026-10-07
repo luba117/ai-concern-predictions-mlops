@@ -13,5 +13,8 @@ spec:
     server: https://kubernetes.default.svc
     namespace: churn-dev
   syncPolicy:
-    automated: {}
-      
+    automated: 
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true  

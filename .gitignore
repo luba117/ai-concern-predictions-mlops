@@ -435,3 +435,7 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+*.tar
+*.zip
+churn-api/windows-amd64/
