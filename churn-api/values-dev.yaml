@@ -1,3 +1,10 @@
 replicaCount: 2
 image:
   tag: "2cee71cbc13c0f3fd354aacdc704650e2103d0fe"
+
+service:
+  type: LoadBalancer
+  annotations:
+    service.beta.kubernetes.io/azure-dns-label-name: churn-dev-32622
+  loadBalancerSourceRanges:
+    - 132.147.164.12/32
