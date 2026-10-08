@@ -1,4 +1,4 @@
 replicaCount: 2
 decisionThreshold: "0.5"
 image:
-  tag: "latest"
+  tag: "2cee71cbc13c0f3fd354aacdc704650e2103d0fe"
